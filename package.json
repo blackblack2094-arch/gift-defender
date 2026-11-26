@@ -1,0 +1,11 @@
+{
+  "name": "gift-defender",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "tiktok-live-connector": "latest",
+    "ws": "^8.18.0"
+  }
+}
