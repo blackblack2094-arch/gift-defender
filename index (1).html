@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gift Defender</title>
+<style>
+:root{--bg:#0a1020;--ink:#f4f7ff;--pink:#ff3d71;--cyan:#2de2e6;--gold:#ffc83d;--card:#1b2a52}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:"Kanit","Noto Sans Thai",system-ui,sans-serif}
+body{display:flex;justify-content:center}
+#wrap{position:relative;height:100%;aspect-ratio:9/16;max-width:100%}
+canvas{width:100%;height:100%;display:block;background:#101a33}
+#feed{position:absolute;left:8px;top:70px;font-size:13px;pointer-events:none;display:flex;flex-direction:column;gap:3px}
+#feed div{background:#000a;padding:3px 10px;border-radius:12px;width:fit-content;max-width:90%}
+#gear{position:absolute;left:8px;bottom:8px;width:44px;height:44px;border:0;border-radius:50%;background:#000a;color:#fff;font-size:22px}
+#panel{position:absolute;inset:0;background:#0a1020f2;padding:14px;overflow-y:auto;display:none}
+#panel.on{display:block}
+h2{font-size:17px;margin:16px 0 8px}
+input,select,button{font:inherit;font-size:16px;color:var(--ink)}
+input,select{background:var(--card);border:1px solid #34467a;border-radius:8px;padding:8px;min-width:0}
+button{border:0;border-radius:8px;padding:8px 12px;background:var(--card)}
+.main{background:var(--pink);font-weight:600}
+.row{display:flex;gap:6px;margin-bottom:6px}
+.row input{flex:1}
+#st{font-size:14px;color:var(--gold);margin-top:6px}
+#dbg{font-size:10px;color:#8fa3d6;white-space:pre-wrap;word-break:break-all;max-height:110px;overflow:auto;margin:6px 0 0}
+#seen button{margin:0 6px 6px 0;background:#26356a}
+</style>
+</head>
+<body>
+<div id="wrap">
+<canvas id="c" width="360" height="640"></canvas>
+<div id="feed"></div>
+<button id="gear" aria-label="ตั้งค่า">⚙</button>
+<div id="panel">
+  <h2 style="margin-top:0">เชื่อมต่อ TikTok LIVE</h2>
+  <div class="row"><input id="u" placeholder="ชื่อ TikTok (ไม่ต้องใส่ @)"><button class="main" id="go">เชื่อมต่อ</button></div>
+  <div class="row" style="margin-top:6px"><input id="k" type="password" placeholder="Euler API key (euler_...)"></div>
+  <div id="st">ยังไม่ได้เชื่อมต่อ</div>
+  <pre id="dbg"></pre>
+  <h2>กติกาของขวัญ</h2>
+  <div id="rules"></div>
+  <button id="add">+ เพิ่มของขวัญ</button>
+  <h2>ของขวัญที่เพิ่งได้รับ (กดเพื่อเพิ่มกติกา)</h2>
+  <div id="seen">ยังไม่มี</div>
+  <button class="main" id="close" style="margin-top:18px;width:100%">กลับไปเกม</button>
+</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const cv=$('c'),g=cv.getContext('2d'),feed=$('feed');
+const FX={turret:'ป้อมปืน',lightning:'ฟ้าผ่า',wipe:'ล้างจอ',heal:'เติมเลือด'};
+function load(k,d){try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}}
+function save(){try{localStorage.setItem('rules',JSON.stringify(rules));localStorage.setItem('user',JSON.stringify($('u').value));localStorage.setItem('key',JSON.stringify($('k').value))}catch(e){}}
+let rules=load('rules',[
+  {gift:'Rose',fx:'turret'},{gift:'TikTok',fx:'lightning'},{gift:'Heart Me',fx:'lightning'},
+  {gift:'Lion',fx:'wipe'},{gift:'Universe',fx:'wipe'}]);
+$('u').value=load('user','');$('k').value=load('key','');
+const seen=[];
+
+// ---------- game ----------
+let S;
+function reset(){S={hp:100,score:0,t:0,en:[],tu:[],bu:[],fx:[],board:{},over:0,spawn:30,flash:0}}
+reset();
+function note(txt){
+  const d=document.createElement('div');d.textContent=txt;feed.appendChild(d);
+  setTimeout(()=>d.remove(),4000);
+  while(feed.children.length>5)feed.firstChild.remove();
+}
+function boom(x,y,c){for(let i=0;i<8;i++)S.fx.push({x,y,vx:(Math.random()-.5)*5,vy:(Math.random()-.5)*5,l:25,c})}
+
+function onGift({user='ผู้ชม',gift='Rose',diamonds=1,count=1}){
+  if(!seen.includes(gift)){seen.unshift(gift);seen.length=Math.min(seen.length,8);renderSeen()}
+  if(S.over)return;
+  S.board[user]=(S.board[user]||0)+diamonds*count;
+  const r=rules.find(r=>r.gift.trim().toLowerCase()===String(gift).toLowerCase());
+  const fx=r?r.fx:(diamonds>=100?'wipe':diamonds>=2?'lightning':'turret');
+  if(fx==='wipe'){
+    S.en.forEach(e=>{S.score++;boom(e.x,e.y,'#ffc83d')});S.en=[];
+    S.hp=Math.min(100,S.hp+30);S.flash=20;
+  }else if(fx==='lightning'){
+    S.en.forEach(e=>e.hp-=4*count);S.flash=10;
+  }else if(fx==='heal'){
+    S.hp=Math.min(100,S.hp+15*count);
+  }else{
+    for(let i=0;i<Math.min(count,10);i++)S.tu.push({x:30+Math.random()*300,ttl:900,cd:0,user});
+  }
+  note(`${user} ส่ง ${gift} ×${count} → ${FX[fx]}`);
+}
+
+function update(){
+  S.t++;
+  if(S.over){if(--S.over===0)reset();return}
+  if(--S.spawn<=0){
+    S.spawn=Math.max(18,70-S.t/60);
+    const hp=2+Math.floor(S.t/1800);
+    S.en.push({x:20+Math.random()*320,y:-20,hp,max:hp,sp:.4+S.t/9000,r:14});
+  }
+  S.en.forEach(e=>{e.y+=e.sp;if(e.y>580){S.hp-=10;e.hp=-99;e.leak=1}});
+  S.tu.forEach(t=>{
+    t.ttl--;
+    if(--t.cd<=0){
+      let n=null,d=1e9;
+      S.en.forEach(e=>{const k=Math.hypot(e.x-t.x,e.y-570);if(e.hp>0&&k<d){d=k;n=e}});
+      if(n){const a=Math.atan2(n.y-570,n.x-t.x);S.bu.push({x:t.x,y:570,vx:Math.cos(a)*8,vy:Math.sin(a)*8});t.cd=22}
+    }
+  });
+  S.tu=S.tu.filter(t=>t.ttl>0);
+  S.bu.forEach(b=>{
+    b.x+=b.vx;b.y+=b.vy;
+    for(const e of S.en){if(e.hp>0&&Math.hypot(e.x-b.x,e.y-b.y)<e.r+4){e.hp--;b.dead=1;boom(b.x,b.y,'#2de2e6');break}}
+    if(b.y<-10||b.x<-10||b.x>370)b.dead=1;
+  });
+  S.bu=S.bu.filter(b=>!b.dead);
+  S.en=S.en.filter(e=>{if(e.hp<=0){if(!e.leak){S.score++;boom(e.x,e.y,'#ff3d71')}return false}return true});
+  S.fx.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.l--});S.fx=S.fx.filter(p=>p.l>0);
+  if(S.flash>0)S.flash--;
+  if(S.hp<=0){S.hp=0;S.over=300}
+}
+
+function draw(){
+  g.clearRect(0,0,360,640);
+  if(S.flash){g.fillStyle=`rgba(255,255,255,${S.flash/30})`;g.fillRect(0,0,360,640)}
+  g.fillStyle='#1b2a52';g.fillRect(0,590,360,50);
+  g.fillStyle='#ff3d71';g.fillRect(0,590,360*S.hp/100,6);
+  S.en.forEach(e=>{
+    g.fillStyle='#ff3d71';g.beginPath();g.arc(e.x,e.y,e.r,0,7);g.fill();
+    g.fillStyle='#0a1020';g.fillRect(e.x-8,e.y-4,5,5);g.fillRect(e.x+3,e.y-4,5,5);
+    if(e.max>1){g.fillStyle='#fff';g.fillRect(e.x-12,e.y-22,24*Math.max(e.hp,0)/e.max,3)}
+  });
+  S.tu.forEach(t=>{
+    g.fillStyle='#2de2e6';g.fillRect(t.x-9,560,18,22);
+    g.fillStyle='#f4f7ff';g.font='10px sans-serif';g.textAlign='center';
+    g.fillText(t.user.slice(0,8),t.x,610);
+  });
+  g.fillStyle='#ffc83d';S.bu.forEach(b=>g.fillRect(b.x-2,b.y-2,4,4));
+  S.fx.forEach(p=>{g.globalAlpha=p.l/25;g.fillStyle=p.c;g.fillRect(p.x,p.y,3,3)});g.globalAlpha=1;
+  g.fillStyle='#f4f7ff';g.textAlign='left';g.font='600 22px sans-serif';g.fillText('คะแนน '+S.score,12,32);
+  g.font='12px sans-serif';g.fillStyle='#ffc83d';g.textAlign='right';
+  Object.entries(S.board).sort((a,b)=>b[1]-a[1]).slice(0,3)
+    .forEach(([u,v],i)=>g.fillText(`${i+1}. ${u.slice(0,10)} 💎${v}`,350,24+i*16));
+  if(S.over){
+    g.fillStyle='#000c';g.fillRect(0,0,360,640);
+    g.fillStyle='#fff';g.textAlign='center';g.font='600 34px sans-serif';g.fillText('ฐานแตก!',180,300);
+    g.font='18px sans-serif';g.fillText('คะแนน '+S.score+' — เริ่มใหม่ใน '+Math.ceil(S.over/60)+' วิ',180,335);
+  }
+}
+(function loop(){update();draw();requestAnimationFrame(loop)})();
+
+// ---------- settings panel ----------
+function renderRules(){
+  $('rules').innerHTML='';
+  rules.forEach((r,i)=>{
+    const row=document.createElement('div');row.className='row';
+    const inp=document.createElement('input');inp.value=r.gift;inp.placeholder='ชื่อของขวัญ (อังกฤษ)';
+    inp.oninput=()=>{r.gift=inp.value;save()};
+    const sel=document.createElement('select');
+    for(const k in FX)sel.add(new Option(FX[k],k));
+    sel.value=r.fx;sel.onchange=()=>{r.fx=sel.value;save()};
+    const t=document.createElement('button');t.textContent='ลอง';
+    t.onclick=()=>{$('panel').classList.remove('on');onGift({user:'ทดสอบ',gift:r.gift,diamonds:1,count:1})};
+    const d=document.createElement('button');d.textContent='✕';
+    d.onclick=()=>{rules.splice(i,1);save();renderRules()};
+    row.append(inp,sel,t,d);$('rules').append(row);
+  });
+}
+function renderSeen(){
+  const box=$('seen');box.innerHTML='';
+  if(!seen.length){box.textContent='ยังไม่มี';return}
+  seen.forEach(n=>{
+    const b=document.createElement('button');b.textContent='+ '+n;
+    b.onclick=()=>{if(!rules.some(r=>r.gift.toLowerCase()===n.toLowerCase())){rules.push({gift:n,fx:'turret'});save();renderRules()}};
+    box.append(b);
+  });
+}
+$('add').onclick=()=>{rules.push({gift:'',fx:'turret'});save();renderRules()};
+$('gear').onclick=()=>$('panel').classList.add('on');
+$('close').onclick=()=>$('panel').classList.remove('on');
+renderRules();
+
+// ---------- live connection: Euler Stream WebSocket (straight from this page) ----------
+let ws,seenMsgs=0,dbgLines=[];
+function dbg(t){dbgLines.push(String(t).slice(0,220));if(dbgLines.length>5)dbgLines.shift();$('dbg').textContent=dbgLines.join('\n')}
+function connect(){
+  save();
+  if(ws){ws.onclose=null;ws.close()}
+  const u=$('u').value.replace('@','').trim(),k=$('k').value.trim();
+  if(!u||!k){$('st').textContent='ใส่ชื่อ TikTok และ API key ก่อน';return}
+  $('st').textContent='กำลังเชื่อมต่อ...';seenMsgs=0;dbgLines=[];$('dbg').textContent='';
+  ws=new WebSocket('wss://ws.eulerstream.com?uniqueId='+encodeURIComponent(u)+'&apiKey='+encodeURIComponent(k));
+  ws.onopen=()=>{$('st').textContent='เชื่อมต่อแล้ว @'+u+' — รอของขวัญ'};
+  ws.onmessage=e=>handle(e.data);
+  ws.onerror=()=>{$('st').textContent='เชื่อมต่อไม่ได้ — เช็กชื่อ/กุญแจ และต้องกำลังไลฟ์อยู่'};
+  ws.onclose=ev=>{$('st').textContent='หลุดการเชื่อมต่อ ('+ev.code+' '+(ev.reason||'')+')'};
+}
+async function handle(d){
+  if(typeof d!=='string'){try{d=await new Blob([d]).text()}catch(e){return}}
+  if(seenMsgs++<3||/gift/i.test(d))dbg(d);
+  let j;try{j=JSON.parse(d)}catch(e){return}
+  const list=Array.isArray(j.messages)?j.messages:[j];
+  list.forEach(m=>{
+    const t=String(m.type||m.method||m.event||'');
+    if(!/gift/i.test(t))return;
+    const x=m.data||m.payload||m;
+    const gd=x.giftDetails||x.gift||{};
+    const type=x.giftType??gd.giftType??gd.type;
+    if(type===1&&!x.repeatEnd)return; // streak still running: wait for the final count
+    onGift({
+      user:(x.user&&(x.user.uniqueId||x.user.nickname))||x.uniqueId||'ผู้ชม',
+      gift:x.giftName??gd.giftName??gd.name??'gift',
+      diamonds:x.diamondCount??gd.diamondCount??gd.diamond_count??1,
+      count:x.repeatCount||1
+    });
+  });
+}
+$('go').onclick=connect;
+</script>
+</body>
+</html>
